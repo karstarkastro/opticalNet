@@ -24,11 +24,11 @@ OPTIONS:
 		-sps 	samples_per_symbol 
 				Number of samples per symbol. Must be an integer. Default = 4
 		-snr 	signal_to_noise_ratio_rx
-				Specify signal to noise ratio (dB) at receiver. Must be an integer. Default = 10
+				Specify signal to noise ratio (dB) at receiver. Must be an integer. Default = 10 [dB]
 		-pn 	phase_noise
 				Adds phase noise to the signal
 		-L		length
-				Length of the SMF in kilometers. Default = 500 km
+				Length of the SMF in kilometers. Default = 500 [km]
 		-wlength wavelength
 				 Wavelength of the signal in meters. Default =  1550[nm]
 		-dp 	dualpolarization
