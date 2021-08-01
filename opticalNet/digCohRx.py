@@ -1,4 +1,4 @@
-from opticalNet import constants
+from opticalNetwork import constants
 import numpy as np
 from scipy.fftpack import fft, fftshift, ifft, ifftshift
 
@@ -46,17 +46,26 @@ def dispersionComp(signal, dispersion, h, length):
 #   exception of 4-QAM which is basically QPSK.
 #   
 #   @param signal   2-by-n matrix where the rows are the X and Y polarizations
+#	@param filter 	Boolean that determines the type of data that will be returned 
+#					by the function. If False it returns the demultiplexed signal 
+#					(which is the case for mPSK or 4-QAM signals) while if True it 
+#					returns the 4 filter taps and the number of taps for each filter
+#					(which is the case for pilot-based mQAM signals)
 #
+#	if filter = False
 #   @return 2-by-n matrix where the rows are the demultiplexed signals
+#	if filter = True
+#	@return hxx, hxy, hyy, hyx are arrays of length cmaTaps representing the filter taps
+#			cmaTaps is an int specifying the length of the filter
 #
 #   [1] Kikuchi K., (2011) "Performance Analysis of polarization demultiplexing based on
 #   constant-modulus algorithm in digital coherent optical receivers" in Optics express 19
 #   (10), 9868-9880
 # 
 ###
-def polarizationDemux(signal):
+def polarizationDemux(signal, filter = False):
 	cmaMu = 1/6000		# step-size parameter for polarization demux using CMA
-	cmaTaps = 109		# number of taps for the CMA algorithm
+	cmaTaps = 7		# number of taps for the CMA algorithm
 	cmaRadius = [1,1]	# radius of CMA
 	if signal.npol == 2:
 		hxx_in = np.zeros(cmaTaps, complex)
@@ -81,9 +90,76 @@ def polarizationDemux(signal):
 			hxy_in = hxy_out
 			hyx_in = hyx_out
 		demuxSignal =  np.vstack((x_out, y_out))
-		return signal.convert_to_signal_class(demuxSignal)
+		return (hxx_in, hyy_in, hxy_in, hyx_in, cmaTaps) if filter else signal.convert_to_signal_class(demuxSignal)
 	else:
 		return signal
+###
+#   @brief Polarization Demultiplexing by CMA algorithm for Pilot Based signals
+#   
+#   Polarization Demux is accomplished by implementing the Constant Modulus
+#   Algorithm [1]. This algorithm is used to demultiplex mQAM modulations. The
+#	signal needs to carry a pilot which is used to obtain the filter taps that
+#	will be applied to the data frame. The modulation of the pilot frame is
+#	generally 4-PSK while the data frame is usually of a higher order modulation
+#	format.
+#   
+#   @param signal   2-by-n matrix where the rows are the X and Y polarizations
+#
+#   @return 2-by-n matrix where the rows are the demultiplexed signals
+#
+#   [1] Kikuchi K., (2011) "Performance Analysis of polarization demultiplexing based on
+#   constant-modulus algorithm in digital coherent optical receivers" in Optics express 19
+#   (10), 9868-9880
+# 
+###
+def polarizationDemuxPilotBased(signal):
+	nframes = int(1/signal.pilotRate)
+	frames = np.split(signal, nframes, axis = 1)
+	idxPilotFrame = np.split(signal.idxPilot, nframes)[0]
+	idxDataFrame = ~idxPilotFrame
+	data = np.array([[],[]])
+	for frame in frames:
+		pilot = frame[:,idxPilotFrame]
+		hxx, hyy, hxy, hyx, taps = polarizationDemux(signal.convert_to_signal_class(pilot), filter = True)
+		demuxData = dataEqualizer(frame[:, idxDataFrame], taps, hxx, hyy, hxy, hyx)
+		data = np.append(data, demuxData, axis = 1) 
+	return signal.convert_to_signal_class(data)
+
+###
+#   @brief Equalizer for the data frame of Pilot Based Signals
+#   
+#   Polarization Demux is accomplished by implementing the Constant Modulus
+#   Algorithm [1]. This algorithm is used to demultiplex mQAM modulations. The
+#	signal needs to carry a pilot which is used to obtain the filter taps that
+#	will be applied to the data frame. The modulation of the pilot frame is
+#	generally 4-PSK while the data frame is usually of a higher order modulation
+#	format (> 16-QAM). This function takes the filters obtained with the pilot
+#	frame and applies them to the data frame in order to do polarization demux.
+#   
+#   @param signal   2-by-n matrix where the rows are the X and Y polarizations
+#	@param taps 	int representing the number of taps of each filter
+#	@param hxx 		array of length taps representing a filter
+#	@param hyy 		array of length taps representing a filter
+#	@param hxy 		array of length taps representing a filter
+#	@param hyx 		array of length taps representing a filter
+#
+#   @return 2-by-n matrix where the rows are the demultiplexed data signals
+#
+###
+def dataEqualizer(signal, taps, hxx, hyy, hxy, hyx):
+    signal = np.concatenate((np.zeros((2, int((taps-1)/2 if taps%2 != 0 else taps/2))), \
+        signal, np.zeros((2, int((taps-1)/2 if taps%2 != 0 else taps/2)))), axis = 1) # zero-padding the signal
+    L = signal.shape[1]
+    x_new = np.zeros(L, complex)
+    y_new = np.zeros(L, complex)
+    for q in range(L - taps + 1):
+        X = signal[0, taps+q-1:None if q == 0 else q-1:-1]
+        Y = signal[1, taps+q-1:None if q == 0 else q-1:-1]
+        x_new[q] = np.dot(hxx, X) + np.dot(hxy, Y)
+        y_new[q] = np.dot(hyx, X) + np.dot(hyy, Y)
+    x_new = x_new[1 if taps%2 == 0 else None:-taps+1] # discarding unnecessary data introduced by zero-padding
+    y_new = y_new[1 if taps%2 == 0 else None:-taps+1]
+    return np.vstack((x_new, y_new))
 
 ###
 #   @brief CMA algorithm

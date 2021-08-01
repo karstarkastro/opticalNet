@@ -44,7 +44,7 @@ OPTIONS:
 
 import argparse
 import numpy as np
-from opticalNet import digCohRx, impairments, measurements, signals 
+from opticalNetwork import digCohRx, impairments, measurements, signals 
 
 
 parser = argparse.ArgumentParser()
@@ -63,12 +63,12 @@ parser.add_argument("-n", "--spans", help = "Number of spans", default = 2, type
 args = parser.parse_args()
 
 
-mod = args.modulation
+mod = args.modulation.upper()
 numSymbols = 2**16
 numSpS = args.sps
 baudRate = 28e9 	# symbols per second
-fs = 25e9	# sampling frequency
-npol = 2 if args.dualpolarization else 1	# number of polarizations for Polarization Multiplexing
+fs = 2*baudRate	# sampling frequency
+nmodes = 2 if args.dualpolarization else 1	# number of polarizations for Polarization Multiplexing
 
 snrdB = args.snr
 length = args.length*1e3 	# fiber length in meters
@@ -76,7 +76,14 @@ linewidth = 2e3	# linewidth of the laser source
 theta = np.pi/7		# azimuth angle for polarization rotation
 phi = np.pi/5		# elevation angle for polarization rotation
 
-sig1 = signals.opticalSignalTransmission(mod, npol, numSymbols, numSpS, baudRate, fs, snrdB)
+# include pilot signal if the modulation signal is 16-QAM or higher
+pilot = True if (args.dualpolarization and (('PSK' or '4-QAM') not in mod)) else False
+
+if pilot:
+	sig1 = signals.opticalSignalwithPilotTx(mod, numSymbols, numSpS, baudRate, fs, snrdB, npol = nmodes)
+else:
+	sig1 = signals.opticalSignalTx(mod, nmodes, numSymbols, numSpS, baudRate, fs, snrdB)
+
 noisySig = impairments.addOpticalImpairments(sig1, args.cd, args.wlength, length, args.phasenoise,\
  linewidth, args.dualpolarization, args.pmd, theta, phi)
 
@@ -84,7 +91,11 @@ noisySig = impairments.addOpticalImpairments(sig1, args.cd, args.wlength, length
 
 dispCompensatedSig = digCohRx.dispersionComp(noisySig, args.cd, args.wlength, length)
 rxFiltSignal = dispCompensatedSig.matchedFilt()
-rxPolDemuxSignal = digCohRx.polarizationDemux(rxFiltSignal)
+
+if pilot:
+	rxPolDemuxSignal = digCohRx.polarizationDemuxPilotBased(rxFiltSignal)
+else:
+	rxPolDemuxSignal = digCohRx.polarizationDemux(rxFiltSignal)
 
 # VISUALIZATION OF POINCARÉ SPHERE AND STOKES PLANE
 
